@@ -18,8 +18,8 @@ logger = set_logger(__name__)
 
 
 DIR_IN  = correct_dirpath("../input/")
-IMAGE_IN_SIZE = 260 
-SEQ_LENGTH    = 256
+IMAGE_IN_SIZE = 260
+SEQ_LENGTH    = 256 + 128
 
 
 def split(text: str):
@@ -164,7 +164,7 @@ if __name__ == "__main__":
         else:
             return (_input, label), label
     dataloader_train = torch.utils.data.DataLoader(
-        dataset_train, batch_size=64, shuffle=True, num_workers=0, 
+        dataset_train, batch_size=32, shuffle=True, num_workers=0, 
         drop_last=True, collate_fn=partial(collate_fn, valid=False)
     )
     dataloader_valid = torch.utils.data.DataLoader(
@@ -193,6 +193,7 @@ if __name__ == "__main__":
         def __init__(self, embed_size: int, d_model: int, nhead: int, seq_length: int=512, index_ignore: int=None, index_sos: int=None, index_eos: int=None):
             super().__init__()
             self.seq_length   = seq_length
+            self.d_model      = d_model
             self.index_ignore = index_ignore
             self.index_sos    = index_sos
             self.index_eos    = index_eos
@@ -205,12 +206,13 @@ if __name__ == "__main__":
             self.nn_embed     = torch.nn.Embedding(embed_size, d_model)
             self.nn_mlp       = torch.nn.Linear(d_model, embed_size)
             self.nn_decode    = torch.nn.Transformer(
-                d_model=d_model, nhead=nhead, num_encoder_layers=2, num_decoder_layers=2, dim_feedforward=2048, dropout=0.1, activation="relu",
+                d_model=d_model, nhead=nhead, num_encoder_layers=1, num_decoder_layers=3, dim_feedforward=2048, dropout=0.1, activation="relu",
             )
         def forward(self, _input, _label=None):
             output = _input.clone()
             output = self.nn_encode.forward_features(output)
-            output = self.nn_encode_c(output)
+            #output = self.nn_encode_c(output)
+            output = output[:, :self.d_model]
             output = output.reshape(output.shape[0], output.shape[1], -1)
             output = torch.einsum("abc->cab", output) # (S, N, E) に変換
             if self.training:
@@ -261,14 +263,14 @@ if __name__ == "__main__":
             return super().forward(input, target)
     
     # Train
-    net = Net(len(tokenizer), 256, 16, seq_length=SEQ_LENGTH, index_ignore=tokenizer.stoi["<pad>"], index_sos=tokenizer.stoi["<sos>"], index_eos=tokenizer.stoi["<eos>"])
+    net = Net(len(tokenizer), 256, 32, seq_length=SEQ_LENGTH, index_ignore=tokenizer.stoi["<pad>"], index_sos=tokenizer.stoi["<sos>"], index_eos=tokenizer.stoi["<eos>"])
     trainer = BaseNN(
         net, mtype="cls",
         loss_funcs=Loss(index_ignore=tokenizer.stoi["<pad>"], index_sos=tokenizer.stoi["<sos>"], index_eos=tokenizer.stoi["<eos>"]),
         optimizer=torch.optim.SGD, optim_params={"lr":0.01, "weight_decay":0},
         dataloader_train=dataloader_train,
         #dataloader_valids=[dataloader_valid], valid_step=10,
-        print_step=200
+        print_step=200, epoch=1
     )
     if args.get("load") is not None:
         trainer.load(model_path=args.get("load"))
